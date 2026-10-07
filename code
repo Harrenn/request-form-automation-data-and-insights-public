@@ -1,0 +1,138 @@
+function ensureCheckboxesOnFormSubmit(e) {
+  var sheet = e.source.getActiveSheet();
+
+  // Check if the response is in 'Form Responses 1'
+  if (sheet.getName() === 'Form Responses 1') {
+    var lastRow = sheet.getLastRow();
+    var checkboxCell = sheet.getRange(lastRow, 30); // Column AD
+    checkboxCell.insertCheckboxes(); // Insert a checkbox
+    Logger.log("Checkbox inserted in row " + lastRow + " of 'Form Responses 1'.");
+  } else {
+    Logger.log("Form submitted to a different sheet: " + sheet.getName());
+  }
+}
+
+function customOnEdit(e) {
+  var sheet = e.source.getActiveSheet();
+  var range = e.range;
+
+  // Check if the edit occurred in Column AD (the checkbox) and if it was checked
+  if (sheet.getName() === 'Form Responses 1' && range.getColumn() == 30 && range.getRow() > 1) { // AD is the 30th column
+    var row = range.getRow(); // Identify the row of concern
+    var isChecked = sheet.getRange(row, 30).getValue(); // Get the value of the checkbox (TRUE if checked)
+
+    Logger.log("Edit detected in 'Form Responses 1', row " + row + ", column AD. Checkbox isChecked: " + isChecked);
+
+    if (isChecked) {
+      var email = sheet.getRange(row, 2).getValue(); // Email Address (Column B)
+      var requestId = sheet.getRange(row, 23).getValue(); // Request ID (Column W)
+      var requestType = sheet.getRange(row, 7).getValue(); // Request Type (Column G)
+      var requestTitle = sheet.getRange(row, 40).getValue(); // Request title. (Column AN)
+      var completeName = sheet.getRange(row, 3).getValue(); // Complete Name (Column C)
+      var assignedTo = sheet.getRange(row, 21).getValue(); // Assigned To (Column U)
+      var complexity = sheet.getRange(row, 24).getValue(); // Complexity (Column X)
+      var sla = sheet.getRange(row, 25).getValue(); // SLA (computed) (Column Y)
+      var plannedStartDate = sheet.getRange(row, 26).getValue(); // Planned Start Date (Column Z)
+      var endDate = sheet.getRange(row, 27).getValue(); // Communicated End Date (computed) (Column AA)
+      var remarks = sheet.getRange(row, 20).getValue(); // Remarks on Decision (Column T)
+
+      Logger.log("Preparing to send emails for row " + row);
+
+      // --- First Email ---
+      if (email) {
+        var subject = "[" + requestId + "] Request for " + requestType + " - " + requestTitle;
+        var body = generateFirstEmailBody(completeName, assignedTo, complexity, sla, plannedStartDate, endDate, remarks);
+
+        Logger.log("Sending first email to: " + email);
+
+        // Send the email with CC to examplemail@mail.com
+        MailApp.sendEmail({
+          to: email,
+          subject: subject,
+          htmlBody: body, // Using htmlBody for HTML formatted email
+          cc: PropertiesService.getScriptProperties().getProperty("NOTIFICATION_CC") || "" // CC field
+        });
+
+        Logger.log("First email sent successfully.");
+      } else {
+        Logger.log("No email address found in column B for row " + row + ". First email not sent.");
+      }
+
+      // --- Second Email (to Column AO) ---
+      var email2 = sheet.getRange(row, 41).getValue(); // Get email from Column AO (index 41)
+      if (email2) {
+          var requestType2 = sheet.getRange(row, 7).getValue(); // Request Type (Column G)
+          var assignedTo2 = sheet.getRange(row, 21).getValue(); // Assigned To (Column U)
+          var requesterName = sheet.getRange(row, 3).getValue(); // Requester Name (Column C)
+          var department = sheet.getRange(row, 4).getValue(); // Department (Column D)
+          var context = sheet.getRange(row, 9).getValue(); // Context (Column I)
+          var objectives = sheet.getRange(row, 10).getValue(); // Objectives (Column J)
+
+          var subject2 = "Assignment of " + requestType2 + " to " + assignedTo2;
+          var body2 = generateSecondEmailBody(assignedTo2, requestType2, requesterName, department, context, objectives); // Pass assignedTo2
+
+          Logger.log("Sending second email to: " + email2);
+
+          MailApp.sendEmail({
+              to: email2,
+              subject: subject2,
+              htmlBody: body2, // Using htmlBody for HTML formatted email
+              cc: PropertiesService.getScriptProperties().getProperty("NOTIFICATION_CC") || "" // Same CC as the first email
+          });
+
+          Logger.log("Second email sent successfully.");
+      } else {
+        Logger.log("No email address found in column AO for row " + row + ". Second email not sent.");
+      }
+    } else {
+      Logger.log("Checkbox in row " + row + " was unchecked. No emails sent.");
+    }
+  } else {
+    Logger.log("Irrelevant edit detected. No action taken.");
+  }
+}
+
+
+// Helper function to generate the HTML formatted body for the first email
+function generateFirstEmailBody(completeName, assignedTo, complexity, sla, plannedStartDate, endDate, remarks) {
+  var formattedPlannedStartDate = Utilities.formatDate(new Date(plannedStartDate), Session.getScriptTimeZone(), "EEE MMM dd yyyy");
+  var formattedEndDate = Utilities.formatDate(new Date(endDate), Session.getScriptTimeZone(), "EEE MMM dd yyyy");
+
+  var body = `
+    <div style="color: black;">
+      <p>Hi ${completeName},</p>
+      <p>We are now processing your request for data analysis. The assignee will communicate with you for additional details on your request.</p>
+      <p>
+        <strong>Assignee:</strong> ${assignedTo}<br>
+        <strong>Complexity:</strong> ${complexity}<br>
+        <strong>SLA:</strong> ${sla}<br>
+        <strong>Planned start date:</strong> ${formattedPlannedStartDate}<br>
+        <strong>Expected completion date:</strong> ${formattedEndDate}<br>
+        <strong>Remarks: </strong> ${remarks}
+      </p>
+      <p>Best regards,<br>Data and Insights Team</p>
+    </div>
+  `;
+
+  Logger.log("HTML body for first email generated.");
+  return body;
+}
+
+// Helper function to generate the HTML formatted body for the second email
+function generateSecondEmailBody(assignedTo, requestType, requesterName, department, context, objectives) {
+  var body = `
+    <div style="color: black;">
+      <p>Hi ${assignedTo},</p>
+      <p>You have been assigned to do the ${requestType} request of ${requesterName} from the ${department}.</p>
+      <p>
+        <strong>Context:</strong> ${context}<br>
+        <strong>Objectives:</strong> ${objectives}
+      </p>
+      <p>For more info: <a href="${PropertiesService.getScriptProperties().getProperty("REQUEST_SHEET_URL") || "#"}" style="color: black; text-decoration: none;">Link to Spreadsheet</a></p>
+      <p>Best regards,<br>Data and Insights Team</p>
+    </div>
+  `;
+
+  Logger.log("HTML body for second email generated.");
+  return body;
+}
